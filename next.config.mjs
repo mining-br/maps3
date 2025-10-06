@@ -3,9 +3,11 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     typedRoutes: true,
+    // Inclui a pasta data/ em TODAS as rotas de API
     outputFileTracingIncludes: {
-      "/api/**": ["data/**"], // inclui CSVs na função serverless
+      "/api/**": ["data/**"],
     },
   },
 };
+
 export default nextConfig;
