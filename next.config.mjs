@@ -3,9 +3,9 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     typedRoutes: true,
-    // inclui a pasta data/ na função /api/search
+    // inclua a pasta data/ nas funções de API
     outputFileTracingIncludes: {
-      "/api/search": ["data/**"],
+      "/api/**": ["data/**"],
     },
   },
 };
