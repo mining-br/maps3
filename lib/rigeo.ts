@@ -1,124 +1,126 @@
+// lib/rigeo.ts
 import * as cheerio from "cheerio";
-import { buildFallbackSearch } from "./utils";
 import type { SheetCandidate, RigeoItem, SearchResponse } from "./types";
 
+const BASE = "https://rigeo.sgb.gov.br";
 const USE_MOCK = process.env.USE_RIGEO_MOCK === "1";
 const MOCK_DELAY = Number(process.env.MOCK_DELAY_MS || 0);
+
+function norm(s?: string) {
+  return (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
+}
+
+function codeVariations(code?: string) {
+  if (!code) return [];
+  const c = code.toUpperCase();
+  return [
+    c,                       // SE-23-Y-A
+    c.replace(/-/g, "."),    // SE.23.Y.A
+    c.replace(/-/g, " "),    // SE 23 Y A
+  ];
+}
 
 async function delay(ms:number){ return new Promise(r => setTimeout(r, ms)); }
 
 async function fetchHtml(url: string){
-  const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; sgb-mapas-app/0.1)" }});
+  const res = await fetch(url, {
+    headers: { "user-agent": "Mozilla/5.0 (compatible; sgb-mapas-app/1.0)" },
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status} ao buscar ${url}`);
   return await res.text();
 }
 
-function parseRigeoItemFromHandlePage(html: string, code?: string): RigeoItem[] {
+/** Busca no RIGeo e retorna uma lista de URLs de /handle/doc/xxx
+ * Priorizamos resultados que CONTENHAM o código da folha (ex.: SE-23-Y-A).
+ */
+async function searchHandlesByCode(city: string, uf: string, code?: string): Promise<string[]> {
+  const qBase = [code, city, uf, "carta geológica mapa geológico geologia SIG relatório recursos"].filter(Boolean).join(" ");
+  const urls = [
+    `${BASE}/simple-search?query=${encodeURIComponent(qBase)}`,
+    `${BASE}/discover?query=${encodeURIComponent(qBase)}`
+  ];
+
+  const best: string[] = [];
+  const seen = new Set<string>();
+  const cands = codeVariations(code);
+
+  for (const url of urls) {
+    try {
+      const html = await fetchHtml(url);
+      const $ = cheerio.load(html);
+      $('a[href*="/handle/doc/"]').each((_, a) => {
+        const href = ($(a).attr("href") || "").trim();
+        if (!href) return;
+        const abs = href.startsWith("http") ? href : `${BASE}${href}`;
+        const text = norm($(a).text());
+        const box  = norm($(a).closest("tr, li, div").text());
+        const scoreHasCode = cands.some(v => text.includes(v) || box.includes(v));
+        if (!seen.has(abs)) {
+          // prioriza quem tem código; mantém alguns sem código como fallback
+          if (scoreHasCode) {
+            best.push(abs);
+            seen.add(abs);
+          } else if (best.length < 3) {
+            best.push(abs);
+            seen.add(abs);
+          }
+        }
+      });
+    } catch {/* ignora página com erro */}
+    if (best.length >= 6) break;
+  }
+  return best.slice(0, 6);
+}
+
+/** Lê a página /handle/doc/... e extrai links diretos (PDF/ZIP) + metadados */
+async function parseHandle(handleUrl: string, code?: string): Promise<RigeoItem> {
+  const html = await fetchHtml(handleUrl);
   const $ = cheerio.load(html);
+
   const title = ($("h2").first().text() || $("title").text() || "Documento RIGeo").trim();
-  const year = $('meta[name="citation_publication_date"]').attr("content") || "";
-  const links: any = {};
-  $("a").each((_, el)=>{
-    const href = $(el).attr("href") || "";
-    const text = ($(el).text() || "").toLowerCase();
-    if (/\.pdf$/i.test(href)) {
-      if (text.includes("geolog")) links.geologia = href;
-      else if (text.includes("recurso") || text.includes("mineral")) links.recursos = href;
-      else if (text.includes("relat")) links.relatorio = href;
-      else links.geologia ??= href;
+  const metaText = $(".item-summary-view, .simple-item-view, body").text();
+  const year = $('meta[name="citation_publication_date"]').attr("content")
+            || (metaText.match(/\b(19|20)\d{2}\b/)?.[0] ?? "");
+
+  // escala provável
+  const scaleMatch = metaText.match(/1[: ]?(\d{1,3}(\.\d{3}){1,2}|\d{6})/i)?.[0]?.replace(/\s+/g,"");
+
+  const links: Record<string,string> = {};
+  // bitstreams (arquivos)
+  $('a[href*="/bitstream/handle/"]').each((_, el) => {
+    const href = ($(el).attr("href") || "").trim();
+    if (!href) return;
+    const abs = href.startsWith("http") ? href : `${BASE}${href}`;
+    const name = ($(el).text() || $(el).attr("title") || abs).toLowerCase();
+
+    const isPdf = /\.pdf(\?|$)/i.test(abs);
+    const isZip = /\.(zip|7z)(\?|$)/i.test(abs);
+
+    if (isPdf) {
+      if (name.includes("geolog") || name.includes("mapa")) links.geologia ??= abs;
+      else if (name.includes("recurso") || name.includes("minera")) links.recursos ??= abs;
+      else if (name.includes("relat") || name.includes("texto") || name.includes("memorial")) links.relatorio ??= abs;
+      else links.geologia ??= abs; // se só há 1 PDF, tratamos como geologia
     }
-    if (/\.(zip|7z)$/i.test(href) || text.includes("sig")) {
-      links.sig = href;
-    }
-    if (href.includes("/handle/")) {
-      links.acervo = href;
+    if (isZip || name.includes("sig") || name.includes("shape") || name.includes("shp") || name.includes("geodatabase") || name.includes("gdb")) {
+      links.sig ??= abs;
     }
   });
-  return [{
+
+  // link da página do acervo
+  links.acervo = handleUrl;
+
+  return {
     code,
     title,
     year,
+    scale: scaleMatch,
     kind: "Documento",
     links,
-  }];
-}
-
-async function tryRigeoQueries(city:string, uf:string, code?:string): Promise<RigeoItem[]> {
-  const q = encodeURIComponent([code, city, uf, "geologia recursos relatório SIG"].filter(Boolean).join(" "));
-  const simple = `https://rigeo.sgb.gov.br/simple-search?query=${q}`;
-  const discover = `https://rigeo.sgb.gov.br/discover?query=${q}`;
-  const items: RigeoItem[] = [];
-
-  try {
-    const html = await fetchHtml(simple);
-    const $ = cheerio.load(html);
-    const firstHandle = $('a[href*="/handle/doc/"]').first().attr("href");
-    if (firstHandle) {
-      const page = firstHandle.startsWith("http") ? firstHandle : `https://rigeo.sgb.gov.br${firstHandle}`;
-      const h = await fetchHtml(page);
-      items.push(...parseRigeoItemFromHandlePage(h, code));
-    } else {
-      items.push({
-        code,
-        title: `Busca RIGeo para ${code || city}`,
-        kind: "Documento",
-        links: { acervo: simple },
-        fallbackSearch: buildFallbackSearch(city, uf, code)
-      });
-    }
-  } catch {
-    items.push({
-      code,
-      title: `Busca RIGeo (fallback) para ${code || city}`,
-      kind: "Documento",
-      links: { acervo: simple },
-      fallbackSearch: buildFallbackSearch(city, uf, code)
-    });
-  }
-
-  items.forEach(it => {
-    if (!it.links) it.links = {};
-    (it.links as any).acervo ??= discover;
-  });
-
-  return items;
+  };
 }
 
 async function mockResults(city:string, uf:string, sheets: SheetCandidate[]): Promise<SearchResponse> {
   if (MOCK_DELAY) await delay(MOCK_DELAY);
-  const groups = { k250: [] as RigeoItem[], k100: [] as RigeoItem[], k50: [] as RigeoItem[], other: [] as RigeoItem[] };
-  for (const s of sheets) {
-    const item: RigeoItem = {
-      code: s.code,
-      title: s.title || `Folha ${s.code}`,
-      uf: s.uf || uf,
-      scale: s.scale,
-      kind: "Documento",
-      links: { acervo: buildFallbackSearch(city, uf, s.code) }
-    };
-    if (s.scale === "1:250000") groups.k250.push(item);
-    else if (s.scale === "1:100000") groups.k100.push(item);
-    else if (s.scale === "1:50000") groups.k50.push(item);
-    else groups.other.push(item);
-  }
-  return { city, uf, sheets, groups };
-}
-
-export async function searchRigeoForSheets(city: string, uf: string, sheets: SheetCandidate[]): Promise<SearchResponse> {
-  if (USE_MOCK) {
-    return mockResults(city, uf, sheets);
-  }
-  const groups = { k250: [] as RigeoItem[], k100: [] as RigeoItem[], k50: [] as RigeoItem[], other: [] as RigeoItem[] };
-  for (const s of sheets) {
-    const items = await tryRigeoQueries(city, uf, s.code);
-    for (const it of items) {
-      it.uf ??= s.uf;
-      it.scale ??= s.scale;
-      if (s.scale === "1:250000") groups.k250.push(it);
-      else if (s.scale === "1:100000") groups.k100.push(it);
-      else if (s.scale === "1:50000") groups.k50.push(it);
-      else groups.other.push(it);
-    }
-  }
-  return { city, uf, sheets, groups };
-}
+  const groups = { k250: [] as RigeoItem[], k100: [] a
