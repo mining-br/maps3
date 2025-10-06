@@ -1,3 +1,4 @@
+// lib/db.ts
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
@@ -15,7 +16,6 @@ function normalizeCode(code: string) {
 
 function readCsvSmart(filePath: string): Row[] {
   const raw = fs.readFileSync(filePath);
-  // tenta , e ; como separador
   for (const delimiter of [",", ";"]) {
     try {
       const rec: any[] = parse(raw, {
@@ -40,7 +40,6 @@ function readCsvSmart(filePath: string): Row[] {
       }
     } catch {}
   }
-  // fallback (auto)
   const rec: any[] = parse(raw, {
     columns: true,
     skip_empty_lines: true,
@@ -81,28 +80,4 @@ function bootstrapInMemory(db: InstanceType<typeof Database>) {
     tx(rows);
   }
   if (fs.existsSync(p100)) {
-    const rows = readCsvSmart(p100).filter((r) => r.code);
-    const ins = db.prepare(`INSERT INTO sheets100k(code, title, uf) VALUES (?, ?, ?);`);
-    const tx = db.transaction((arr: Row[]) => arr.forEach((r) => ins.run(r.code, r.title, r.uf)));
-    tx(rows);
-  }
-}
-
-let db: InstanceType<typeof Database> | null = null;
-
-// Retorna um DB válido SEM depender de escrever em disco (serverless é read-only).
-export function getDB() {
-  if (db) return db;
-
-  const file = path.join(process.cwd(), "data", "atlas.db");
-  // Tenta abrir o arquivo se ele estiver empacotado; se não existir, cria em memória.
-  if (fs.existsSync(file)) {
-    db = new Database(file, { fileMustExist: true });
-    return db;
-  }
-
-  // Serverless sem atlas.db → usa DB em memória e carrega os CSVs
-  db = new Database(":memory:");
-  bootstrapInMemory(db);
-  return db;
-}
+    const rows = readCsvSmart(p100).filter((r) => r.code)
