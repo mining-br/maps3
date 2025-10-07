@@ -1,19 +1,22 @@
-import { NextResponse } from "next/server";
-import { resolveSheetsForPlace } from "@/lib/sheets";
-import { searchRigeoForSheets } from "@/lib/rigeo";
+// app/api/health/route.ts
+import fs from "node:fs";
+import path from "node:path";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export async function GET() {
   try {
-    const { city, uf } = await req.json();
-    if (!city || !uf) {
-      return NextResponse.json({ error: "city e uf são obrigatórios" }, { status: 400 });
-    }
-    const sheets = await resolveSheetsForPlace(city, uf);
-    const results = await searchRigeoForSheets(city, uf, sheets);
-    return NextResponse.json(results);
-  } catch (e:any) {
-    return NextResponse.json({ error: e.message || "Erro inesperado" }, { status: 500 });
+    const p = path.join(process.cwd(), "data", "vercel_data.json");
+    const exists = fs.existsSync(p);
+    const size = exists ? fs.statSync(p).size : 0;
+    return new Response(
+      JSON.stringify({ ok: true, data_json_exists: exists, size }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  } catch (e: any) {
+    return new Response(JSON.stringify({ ok: false, error: String(e?.message || e) }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }
 }
