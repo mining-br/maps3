@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Search } from "lucide-react";
+import Results from "@/components/Results";
 
 type Links = {
   geologia?: string;
@@ -177,8 +178,8 @@ export default function HomePage() {
         </div>
       )}
 
-      {!loading && result && (
-        <div className="mt-6">
+{!loading && result?.ok && (
+  <Results city={result.city} uf={result.uf} groups={result.groups} />
           {groups.k250.length === 0 &&
           groups.k100.length === 0 &&
           groups.k50.length === 0 &&
