@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import SearchForm from "@/components/SearchForm";
-import Results from "@/components/Results";
+import SearchForm from "./components/SearchForm";
+import Results from "./components/Results";
 
 export default function HomePage() {
   const [city, setCity] = useState("");
@@ -38,7 +38,6 @@ export default function HomePage() {
         Atlas Geológico — SGB/CPRM
       </h1>
 
-      {/* formulário de busca */}
       <div className="mb-8">
         <SearchForm
           city={city}
@@ -50,19 +49,16 @@ export default function HomePage() {
         />
       </div>
 
-      {/* mensagens de erro */}
       {error && (
         <div className="text-red-600 text-center mb-4">
           ❌ Erro: {error}
         </div>
       )}
 
-      {/* resultados */}
       {!loading && result?.ok && (
         <Results city={result.city} uf={result.uf} groups={result.groups} />
       )}
 
-      {/* estado de carregamento */}
       {loading && (
         <div className="text-center text-gray-600 mt-6 animate-pulse">
           Carregando resultados…
@@ -71,4 +67,3 @@ export default function HomePage() {
     </main>
   );
 }
-
