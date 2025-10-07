@@ -30,19 +30,16 @@ type ApiGroups = {
 /** =======================
  *  SearchForm (com autocomplete IBGE)
  *  ======================= */
+/** =======================
+ *  SearchForm (autocomplete local por UF + texto)
+ *  ======================= */
 type IbgeCity = {
   id: number;
   nome: string;
-  microrregiao?: { mesorregiao?: { UF?: { sigla?: string } } };
-  "regiao-imediata"?: { "regiao-intermediaria"?: { UF?: { sigla?: string } } };
 };
 
-function getUfFromIbge(c: IbgeCity): string {
-  return (
-    c?.microrregiao?.mesorregiao?.UF?.sigla ||
-    c?.["regiao-imediata"]?.["regiao-intermediaria"]?.UF?.sigla ||
-    ""
-  );
+function norm(s: string) {
+  return (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
 }
 
 function SearchForm({
@@ -63,9 +60,10 @@ function SearchForm({
   const [q, setQ] = useState(city);
   const [open, setOpen] = useState(false);
   const [fetching, setFetching] = useState(false);
-  const [items, setItems] = useState<Array<{ name: string; uf: string }>>([]);
+  const [allCities, setAllCities] = useState<IbgeCity[]>([]);
   const boxRef = useRef<HTMLDivElement | null>(null);
 
+  // fecha dropdown ao clicar fora
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -75,54 +73,48 @@ function SearchForm({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  // quando troca a UF, baixa TODAS as cidades da UF uma vez
   useEffect(() => {
-    if (!q || q.trim().length < 2) {
-      setItems([]);
+    if (!uf) {
+      setAllCities([]);
       return;
     }
-    const t = setTimeout(async () => {
+    (async () => {
       try {
         setFetching(true);
-        const url = `https://servicodados.ibge.gov.br/api/v1/localidades/municipios?nome=${encodeURIComponent(
-          q.trim()
-        )}`;
-        const res = await fetch(url, { cache: "no-store" });
+        // endpoint do IBGE por UF:
+        // https://servicodados.ibge.gov.br/api/v1/localidades/estados/RO/municipios
+        const url = `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(
+          uf
+        )}/municipios`;
+        const res = await fetch(url, { cache: "force-cache" });
         const data: IbgeCity[] = await res.json();
-        const seen = new Set<string>();
-        const rows: Array<{ name: string; uf: string }> = [];
-        for (const c of data) {
-          const name = c?.nome || "";
-          const ufSigla = (getUfFromIbge(c) || "").toUpperCase();
-          if (!name || !ufSigla) continue;
-          const key = `${name}|${ufSigla}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            rows.push({ name, uf: ufSigla });
-          }
-        }
-        const prioritized = rows.sort((a, b) => {
-          if (!uf) return 0;
-          const aw = a.uf === uf ? -1 : 0;
-          const bw = b.uf === uf ? -1 : 0;
-          return aw - bw;
-        });
-        setItems(prioritized.slice(0, 20));
-        setOpen(true);
+        setAllCities(
+          (data || []).map((c) => ({ id: c.id, nome: c.nome })).sort((a, b) =>
+            a.nome.localeCompare(b.nome, "pt")
+          )
+        );
       } catch {
-        setItems([]);
-        setOpen(false);
+        setAllCities([]);
       } finally {
         setFetching(false);
       }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [q, uf]);
+    })();
+  }, [uf]);
 
-  const canSearch = useMemo(() => !!q.trim() && !!uf, [q, uf]);
+  // filtra localmente por substring (sem acentos), só dentro da UF selecionada
+  const filtered = useMemo(() => {
+    const tq = norm(q.trim());
+    if (!tq) return [];
+    return allCities
+      .filter((c) => norm(c.nome).includes(tq))
+      .slice(0, 40);
+  }, [q, allCities]);
 
-  function pick(name: string, ufSel: string) {
+  const canSearch = useMemo(() => !!city && !!uf, [city, uf]);
+
+  function pick(name: string) {
     onCityChange(name);
-    onUfChange(ufSel);
     setQ(name);
     setOpen(false);
   }
@@ -137,11 +129,13 @@ function SearchForm({
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
-              onCityChange(""); // limpa seleção até o usuário confirmar
+              onCityChange(""); // limpa seleção até confirmar
+              setOpen(true);
             }}
-            onFocus={() => q.trim().length >= 2 && setOpen(true)}
+            onFocus={() => setOpen(true)}
             placeholder="Ex.: Cerro Corá"
             className="outline-none flex-1"
+            disabled={!uf}
           />
           {q && (
             <button
@@ -149,7 +143,6 @@ function SearchForm({
               onClick={() => {
                 setQ("");
                 onCityChange("");
-                setItems([]);
                 setOpen(false);
               }}
               className="text-gray-400 hover:text-gray-600"
@@ -161,27 +154,27 @@ function SearchForm({
           )}
         </div>
 
-        {open && (items.length > 0 || fetching) && (
+        {open && (filtered.length > 0 || fetching) && (
           <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-72 overflow-auto">
             {fetching && (
-              <div className="px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
-                <span className="animate-spin">⏳</span> Carregando…
-              </div>
+              <div className="px-3 py-2 text-sm text-gray-500">Carregando…</div>
             )}
             {!fetching &&
-              items.map((it, idx) => (
+              filtered.map((it) => (
                 <button
-                  key={`${it.name}-${it.uf}-${idx}`}
+                  key={it.id}
                   type="button"
-                  onClick={() => pick(it.name, it.uf)}
+                  onClick={() => pick(it.nome)}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50"
                 >
-                  <div className="text-sm font-medium">{it.name}</div>
-                  <div className="text-xs text-gray-500">UF: {it.uf}</div>
+                  <div className="text-sm font-medium">{it.nome}</div>
+                  <div className="text-xs text-gray-500">UF: {uf}</div>
                 </button>
               ))}
-            {!fetching && items.length === 0 && (
-              <div className="px-3 py-2 text-sm text-gray-500">Sem resultados…</div>
+            {!fetching && filtered.length === 0 && q.trim() && (
+              <div className="px-3 py-2 text-sm text-gray-500">
+                Nenhuma cidade em {uf} contém “{q}”.
+              </div>
             )}
           </div>
         )}
@@ -192,7 +185,12 @@ function SearchForm({
         <label className="block text-sm text-gray-600 mb-1">UF</label>
         <select
           value={uf}
-          onChange={(e) => onUfChange(e.target.value)}
+          onChange={(e) => {
+            onUfChange(e.target.value);
+            setQ("");
+            onCityChange("");
+            setOpen(false);
+          }}
           className="border rounded-lg px-3 py-2 w-full bg-white"
         >
           <option value="">Selecione</option>
