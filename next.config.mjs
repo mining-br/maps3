@@ -3,7 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     typedRoutes: true,
-    // Inclui a pasta data/ em TODAS as rotas de API
+    // Inclui arquivos da pasta data/ nas funções (necessário pra Vercel achar vercel_data.json)
     outputFileTracingIncludes: {
       "/api/**": ["data/**"],
     },
