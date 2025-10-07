@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { Loader2, Search } from "lucide-react";
+import SearchForm from "@/components/SearchForm";
 import Results from "@/components/Results";
+
 
 type Links = {
   geologia?: string;
