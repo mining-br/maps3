@@ -10,7 +10,8 @@ function norm(s: string) {
 export function searchCities(query: string, uf?: string) {
   const db = getDB();
   const q = norm(query);
-  const list = db.cities.filter((c) => (uf ? c.uf === uf : true));
+  const list = db.cities.filter((c: any) => (uf ? c.uf === uf : true));
+
 
   // match por includes no nome e no alias/altNames (se houver)
   const hits = list
