@@ -17,7 +17,7 @@ export function searchCities(query: string, uf?: string) {
   // match por includes no nome e no alias/altNames (se houver)
   const hits = list
     .map((c: SheetCandidate) => {
-      const name = norm(c.city_name);
+      const name = norm(c.title || "");
       const score =
         (name.startsWith(q) ? 0 : 1) + (name.includes(q) ? 0 : 1) +
         (uf && c.uf !== uf ? 2 : 0);
