@@ -1,5 +1,5 @@
 // lib/rigeo.ts
-import * as cheerio from "cheerio";
+import { load } from "cheerio";
 import type { SheetCandidate, RigeoItem, SearchResponse } from "./types";
 
 const BASE = "https://rigeo.sgb.gov.br";
@@ -55,7 +55,7 @@ async function searchHandlesByCode(city: string, uf: string, code?: string): Pro
   for (const url of urls) {
     try {
       const html = await fetchHtml(url);
-      const $ = cheerio.load(html);
+      const $ = load(html);
       $('a[href*="/handle/doc/"]').each((_, a) => {
         const href = ($(a).attr("href") || "").trim();
         if (!href) return;
