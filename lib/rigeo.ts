@@ -1,5 +1,5 @@
 // lib/rigeo.ts
-import { load as loadHtml } from "cheerio";
+import { load } from "cheerio";
 import type { SheetCandidate, RigeoItem, SearchResponse } from "./types";
 
 const BASE = "https://rigeo.sgb.gov.br";
