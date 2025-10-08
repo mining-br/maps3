@@ -83,7 +83,7 @@ async function searchHandlesByCode(city: string, uf: string, code?: string): Pro
 
 async function parseHandle(handleUrl: string, code?: string): Promise<RigeoItem> {
   const html = await fetchHtml(handleUrl);
-  const $ = loadHtml(html);
+  const $ = load(html);
   const title = ($("h2").first().text() || $("title").text() || "Documento RIGeo").trim();
   const metaText = $(".item-summary-view, .simple-item-view, body").text();
   const year =
