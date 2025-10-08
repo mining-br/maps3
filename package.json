@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "make:vercel": "node scripts/make-vercel-json.js"
+    "lint": "next lint"
   },
   "dependencies": {
     "next": "14.2.5",
@@ -18,10 +17,12 @@
     "@types/node": "^20.12.12",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "tailwindcss": "^3.4.10",
+    "postcss": "^8.4.41",
+    "autoprefixer": "^10.4.20"
   },
   "engines": {
     "node": "20.x"
   }
 }
-
