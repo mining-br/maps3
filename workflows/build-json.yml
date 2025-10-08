@@ -1,0 +1,21 @@
+name: Build vercel_data.json
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i
+      - run: npm i csv-parse
+      - run: npm run make:vercel
+      - run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/vercel_data.json
+          git commit -m "Atualiza vercel_data.json" || echo "sem alterações"
+          git push
