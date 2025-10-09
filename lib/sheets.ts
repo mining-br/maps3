@@ -1,36 +1,33 @@
-import { getDB } from "./db";
-import { normalizeCode, strip } from "./utils";
+// lib/sheets.ts
 import type { SheetCandidate } from "./types";
+import { getDB } from "./db";
+import { normalizeCode as norm } from "./utils";
 
-// remove acentos e baixa para minúsculas
-function norm(s: string) {
-  return strip(s).toLowerCase();
-}
+type Hit = { c: SheetCandidate; score: number };
 
-export function searchCities(query: string, uf?: string) {
+export function searchCities(query: string, uf?: string): SheetCandidate[] {
   const db = getDB();
   const q = norm(query);
-  const list = db.cities.filter((c: SheetCandidate) => (uf ? c.uf === uf : true));
 
+  const list: SheetCandidate[] = db.cities.filter((c: SheetCandidate) =>
+    uf ? c.uf === uf : true
+  );
 
-
-  // match por includes no nome e no alias/altNames (se houver)
-  const hits = list
-    .map((c: SheetCandidate) => {
+  const hits: SheetCandidate[] = list
+    .map((c: SheetCandidate): Hit => {
       const name = norm(c.title || "");
       const score =
-        (name.startsWith(q) ? 0 : 1) + (name.includes(q) ? 0 : 1) +
+        (name.startsWith(q) ? 0 : 1) +
+        (name.includes(q) ? 0 : 1) +
         (uf && c.uf !== uf ? 2 : 0);
       return { c, score };
     })
-    .filter((x: { c: SheetCandidate; score: number }) =>
-    q.length === 0 ? true : norm(x.c.title || "").includes(q)
-)
-    .sort((a, b) => a.score - b.score)
+    .filter((x: Hit) =>
+      q.length === 0 ? true : norm(x.c.title || "").includes(q)
+    )
+    .sort((a: Hit, b: Hit) => a.score - b.score)
     .slice(0, 50)
-    .map((x) => x.c);
-
+    .map((x: Hit) => x.c);
 
   return hits;
 }
-
