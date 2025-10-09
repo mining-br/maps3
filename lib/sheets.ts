@@ -1,33 +1,28 @@
 // lib/sheets.ts
-import type { SheetCandidate } from "./types";
 import { getDB } from "./db";
-import { normalizeCode as norm } from "./utils";
+import type { SheetCandidate } from "./types";
 
-type Hit = { c: SheetCandidate; score: number };
+// Função auxiliar para normalizar texto (minúsculas + sem acentos)
+function norm(str: string): string {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
-export function searchCities(query: string, uf?: string): SheetCandidate[] {
+export function searchCity(query: string, uf?: string): SheetCandidate[] {
   const db = getDB();
   const q = norm(query);
 
-  const list: SheetCandidate[] = db.cities.filter((c: SheetCandidate) =>
-    uf ? c.uf === uf : true
+  // filtra cidades pelo UF (se informado)
+  const list = db.cities.filter((c) =>
+    uf ? c.uf?.toUpperCase() === uf.toUpperCase() : true
   );
 
-  const hits: SheetCandidate[] = list
-    .map((c: SheetCandidate): Hit => {
-      const name = norm(c.title || "");
-      const score =
-        (name.startsWith(q) ? 0 : 1) +
-        (name.includes(q) ? 0 : 1) +
-        (uf && c.uf !== uf ? 2 : 0);
-      return { c, score };
-    })
-    .filter((x: Hit) =>
-      q.length === 0 ? true : norm(x.c.title || "").includes(q)
-    )
-    .sort((a: Hit, b: Hit) => a.score - b.score)
-    .slice(0, 50)
-    .map((x: Hit) => x.c);
+  // procura correspondência no nome normalizado
+  const hits = list.filter((c) => norm(c.title).includes(q));
 
-  return hits;
+  // se nada encontrado, retorna lista vazia
+  return hits.slice(0, 50);
 }
