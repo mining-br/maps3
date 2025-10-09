@@ -1,6 +1,6 @@
 // app/api/search/route.ts
 import { NextResponse } from "next/server";
-import { searchCitySheets } from "../../lib/rigeo"; // <- relativo (saiu de '@/lib/rigeo')
+import { searchCitySheets } from "../../../lib/rigeo";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -8,7 +8,10 @@ export async function GET(req: Request) {
   const city = (searchParams.get("city") || "").trim();
 
   if (!uf || !city) {
-    return NextResponse.json({ ok: false, error: "Informe city e uf." }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Informe city e uf." },
+      { status: 400 }
+    );
   }
 
   const res = await searchCitySheets({ uf, city });
