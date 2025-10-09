@@ -1,189 +1,144 @@
-// lib/rigeo.ts
-import { load } from "cheerio";
-import type { SheetCandidate, RigeoItem, SearchResponse } from "./types";
+import * as cheerio from "cheerio";
+import { RIGeoItem } from "./types";
+import { detectScaleFromText, normStr, uniqueBy } from "./utils";
 
 const BASE = "https://rigeo.sgb.gov.br";
-const USE_MOCK = process.env.USE_RIGEO_MOCK === "1";
-const MOCK_DELAY = Number(process.env.MOCK_DELAY_MS || 0);
 
-function norm(s?: string) {
-  return (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
-}
+/**
+ * Faz busca "ao vivo" no RIGeo por cidade+UF.
+ * Estratégia:
+ *  1) simple-search com `${city} ${uf}` (score desc, até 200 itens em 2 páginas).
+ *  2) Para cada resultado, entra no handle e coleta:
+ *     - título
+ *     - links (bitstreams: PDFs/ZIPs)
+ *     - ano (se conseguir extrair por regex)
+ *     - escala (por regex no título/descrição)
+ */
+export async function searchRIGeoByCityUF(city: string, uf: string): Promise<RIGeoItem[]> {
+  const q = `${city} ${uf}`;
+  const pages = [0, 100]; // start offsets (0 e 100) para pegar até ~200 resultados
+  const items: RIGeoItem[] = [];
 
-function codeVariations(code?: string) {
-  if (!code) return [];
-  const c = code.toUpperCase();
-  return [c, c.replace(/-/g, "."), c.replace(/-/g, " ")];
-}
+  for (const start of pages) {
+    const url = `${BASE}/simple-search?query=${encodeURIComponent(q)}&sort_by=score&order=desc&rpp=100&etal=0&start=${start}`;
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
 
-function toAbs(href?: string, pageUrl?: string) {
-  if (!href) return "";
-  try {
-    if (/^https?:\/\//i.test(href)) return href;
-    return new URL(href, pageUrl || BASE).toString();
-  } catch {
-    return href ?? "";
-  }
-}
+    const links = $('a[href*="/handle/"]')
+      .toArray()
+      .map((a) => $(a).attr("href"))
+      .filter(Boolean) as string[];
 
-async function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+    // Os resultados podem repetir anchors; normaliza e filtra só os handles
+    const handleHrefs = Array.from(
+      new Set(
+        links
+          .filter((h) => /^\/handle\/\d+\/\d+/.test(h))
+          .map((h) => (h.startsWith("http") ? h : `${BASE}${h}`))
+      )
+    );
 
-async function fetchHtml(url: string) {
-  const res = await fetch(url, {
-    headers: { "user-agent": "Mozilla/5.0 (compatible; sgb-mapas-app/1.0)" },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ao buscar ${url}`);
-  return await res.text();
-}
-
-async function searchHandlesByCode(city: string, uf: string, code?: string): Promise<string[]> {
-  const qBase = [code, city, uf, "carta geológica mapa geológico geologia SIG relatório recursos"]
-    .filter(Boolean)
-    .join(" ");
-  const urls = [
-    `${BASE}/simple-search?query=${encodeURIComponent(qBase)}`,
-    `${BASE}/discover?query=${encodeURIComponent(qBase)}`,
-  ];
-
-  const best: string[] = [];
-  const seen = new Set<string>();
-  const cands = codeVariations(code);
-
-  for (const url of urls) {
-    try {
-      const html = await fetchHtml(url);
-      const $ = load(html);
-      $('a[href*="/handle/doc/"]').each((_, a) => {
-        const href = ($(a).attr("href") || "").trim();
-        if (!href) return;
-        const abs = toAbs(href, BASE);
-        const text = norm($(a).text());
-        const box = norm($(a).closest("tr, li, div").text());
-        const hasCode = cands.some((v) => text.includes(v) || box.includes(v));
-        if (!seen.has(abs)) {
-          if (hasCode) {
-            best.push(abs);
-            seen.add(abs);
-          } else if (best.length < 3) {
-            best.push(abs);
-            seen.add(abs);
-          }
-        }
-      });
-    } catch {
-      // ignora erros
-    }
-    if (best.length >= 6) break;
-  }
-  return best.slice(0, 6);
-}
-
-async function parseHandle(handleUrl: string, code?: string): Promise<RigeoItem> {
-  const html = await fetchHtml(handleUrl);
-  const $ = load(html);
-  const title = ($("h2").first().text() || $("title").text() || "Documento RIGeo").trim();
-  const metaText = $(".item-summary-view, .simple-item-view, body").text();
-  const year =
-    $('meta[name="citation_publication_date"]').attr("content") ||
-    (metaText.match(/\b(19|20)\d{2}\b/)?.[0] ?? "");
-  const scaleMatch = metaText.match(/1[: ]?(\d{1,3}(\.\d{3}){1,2}|\d{6})/i)?.[0]?.replace(/\s+/g, "");
-
-  const links: Record<string, string> = {};
-
-  // captura todos os bitstreams e normaliza as URLs para absolutas
-  $('a[href*="/bitstream/"]').each((_, el) => {
-    const href = ($(el).attr("href") || "").trim();
-    if (!href) return;
-    const abs = toAbs(href, handleUrl);
-    const name = ($(el).text() || $(el).attr("title") || abs).toLowerCase();
-
-    const isPdf = /\.pdf(\?|$)/i.test(abs);
-    const isZip = /\.(zip|7z)(\?|$)/i.test(abs);
-
-    if (isPdf) {
-      if (name.includes("geolog") || name.includes("mapa")) links.geologia ??= abs;
-      else if (name.includes("recurso") || name.includes("minera")) links.recursos ??= abs;
-      else if (name.includes("relat") || name.includes("texto") || name.includes("memorial")) links.relatorio ??= abs;
-      else links.geologia ??= abs;
-    }
-    if (isZip || name.includes("sig") || name.includes("shape") || name.includes("shp") || name.includes("geodatabase") || name.includes("gdb")) {
-      links.sig ??= abs;
-    }
-  });
-
-  links.acervo = toAbs(handleUrl, BASE);
-
-  return {
-    code,
-    title,
-    year,
-    scale: scaleMatch,
-    kind: "Documento",
-    links,
-  };
-}
-
-async function mockResults(city: string, uf: string, sheets: SheetCandidate[]): Promise<SearchResponse> {
-  if (MOCK_DELAY) await delay(MOCK_DELAY);
-  const groups = { k250: [] as RigeoItem[], k100: [] as RigeoItem[], k50: [] as RigeoItem[], other: [] as RigeoItem[] };
-  for (const s of sheets) {
-    const item: RigeoItem = {
-      code: s.code,
-      title: s.title || `Folha ${s.code}`,
-      uf,
-      scale: s.scale,
-      kind: "Documento",
-      links: { acervo: `${BASE}/simple-search?query=${encodeURIComponent(s.code)}` },
-    };
-    if (s.scale === "1:250000") groups.k250.push(item);
-    else if (s.scale === "1:100000") groups.k100.push(item);
-    else if (s.scale === "1:50000") groups.k50.push(item);
-    else groups.other.push(item);
-  }
-  return { city, uf, sheets, groups };
-}
-
-export async function searchRigeoForSheets(city: string, uf: string, sheets: SheetCandidate[]): Promise<SearchResponse> {
-  if (USE_MOCK) return mockResults(city, uf, sheets);
-
-  const groups = { k250: [] as RigeoItem[], k100: [] as RigeoItem[], k50: [] as RigeoItem[], other: [] as RigeoItem[] };
-
-  for (const s of sheets) {
-    const handles = await searchHandlesByCode(city, uf, s.code);
-
-    if (handles.length === 0) {
-      const fallback: RigeoItem = {
-        code: s.code,
-        title: `Busca RIGeo para ${s.code}`,
-        uf,
-        scale: s.scale,
-        kind: "Documento",
-        links: { acervo: `${BASE}/simple-search?query=${encodeURIComponent(s.code + " " + city + " " + uf)}` },
-      };
-      if (s.scale === "1:250000") groups.k250.push(fallback);
-      else if (s.scale === "1:100000") groups.k100.push(fallback);
-      else if (s.scale === "1:50000") groups.k50.push(fallback);
-      else groups.other.push(fallback);
-      continue;
-    }
-
-    for (const h of handles) {
+    for (const handle of handleHrefs) {
       try {
-        const item = await parseHandle(h, s.code);
-        item.uf ??= uf;
-        item.scale ??= s.scale;
-        if (s.scale === "1:250000") groups.k250.push(item);
-        else if (s.scale === "1:100000") groups.k100.push(item);
-        else if (s.scale === "1:50000") groups.k50.push(item);
-        else groups.other.push(item);
+        const item = await parseHandlePage(handle, city, uf);
+        if (item) items.push(item);
       } catch {
-        // ignora handle com erro
+        // ignora itens que falharem
       }
     }
   }
 
-  return { city, uf, sheets, groups };
+  // deduplica por handle e faz pequeno ranking (prioriza escala conhecida)
+  const dedup = uniqueBy(items, (x) => x.handle);
+  dedup.sort((a, b) => scaleRank(a.scale) - scaleRank(b.scale));
+  return dedup;
+}
+
+function scaleRank(s: RIGeoItem["scale"]) {
+  switch (s) {
+    case "50k": return 0;
+    case "100k": return 1;
+    case "250k": return 2;
+    default: return 3;
+  }
+}
+
+async function fetchHtml(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (maps3-live/1.0)" } });
+  if (!res.ok) throw new Error(`Falha ao acessar ${url}`);
+  return await res.text();
+}
+
+async function parseHandlePage(handleUrl: string, city: string, uf: string): Promise<RIGeoItem | null> {
+  const html = await fetchHtml(handleUrl);
+  const $ = cheerio.load(html);
+
+  // título
+  const title =
+    $("h2, .page-title, .item-title").first().text().trim() ||
+    $('meta[name="DC.title"]').attr("content") ||
+    "Documento RIGeo";
+
+  // Coleta bitstreams (PDF/ZIPs)
+  const links: { href: string; label: string }[] = [];
+  $('a[href*="/bitstream/"]').each((_i, a) => {
+    const href = $(a).attr("href");
+    if (!href) return;
+    const label = ($(a).text() || "Arquivo").trim();
+    const abs = href.startsWith("http") ? href : `${BASE}${href}`;
+    // preferir PDF/ZIP, mas guardar qualquer coisa
+    if (/\.(pdf|zip)$/i.test(abs) || /bitstream/.test(abs)) {
+      links.push({ href: abs, label });
+    }
+  });
+
+  // Tenta extrair metadados básicos
+  const pageText = $("body").text();
+  const yearMatch = pageText.match(/\b(19|20)\d{2}\b/);
+  const year = yearMatch?.[0];
+
+  // Detecta escala por título + texto
+  const scale = detectScaleFromText(`${title} ${pageText}`);
+
+  // Heurística de pertinência: a página precisa mencionar a cidade OU o título conter UF/cidade
+  const hasCity =
+    normStr(pageText).includes(normStr(city)) ||
+    normStr(title).includes(normStr(city));
+
+  const hasUF =
+    new RegExp(`\\b${uf}\\b`, "i").test(title) ||
+    new RegExp(`\\b${uf}\\b`, "i").test(pageText);
+
+  // Relaxa um pouco: se escala conhecida e tiver pelo menos UF, aceita.
+  if (!hasCity && !hasUF) {
+    // muitas cartas não trazem subject municipal; filtra pouco, mas evita ruído
+    return null;
+  }
+
+  return {
+    handle: handleUrl,
+    title,
+    year,
+    uf,
+    links: compactLinks(links),
+    scale
+  };
+}
+
+function compactLinks(links: { href: string; label: string }[]) {
+  // tenta renomear rótulos mais amigáveis
+  return links.map((l) => {
+    const low = l.href.toLowerCase();
+    let label = l.label || "Arquivo";
+    if (low.endsWith(".pdf")) {
+      if (/explicativo|relatorio/.test(low)) label = "Relatório (PDF)";
+      else if (/recursos|minerais/.test(low)) label = "Recursos Minerais (PDF)";
+      else if (/geolog/i.test(low)) label = "Carta Geológica (PDF)";
+      else label = "PDF";
+    } else if (low.endsWith(".zip")) {
+      if (/sig|shape|shp|geologia/.test(low)) label = "Dados SIG (ZIP)";
+      else label = "ZIP";
+    }
+    return { href: l.href, label };
+  });
 }
