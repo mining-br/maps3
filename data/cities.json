@@ -1,0 +1,7 @@
+[
+  { "code": "SD-23", "title": "Itabuna",     "uf": "BA", "scale": "1:100000" },
+  { "code": "SD-23", "title": "Ilhéus",      "uf": "BA", "scale": "1:100000" },
+  { "code": "SF-23", "title": "Belo Horizonte", "uf": "MG", "scale": "1:100000" },
+  { "code": "SG-22", "title": "Curitiba",    "uf": "PR", "scale": "1:250000" },
+  { "code": "SI-23", "title": "Porto Alegre","uf": "RS", "scale": "1:250000" }
+]
