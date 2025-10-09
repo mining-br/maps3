@@ -23,10 +23,13 @@ export function searchCities(query: string, uf?: string) {
         (uf && c.uf !== uf ? 2 : 0);
       return { c, score };
     })
-    .filter((x) => q.length === 0 ? true : norm(x.c.city_name).includes(q))
+    .filter((x: { c: SheetCandidate; score: number }) =>
+    q.length === 0 ? true : norm(x.c.title || "").includes(q)
+)
     .sort((a, b) => a.score - b.score)
     .slice(0, 50)
     .map((x) => x.c);
+
 
   return hits;
 }
