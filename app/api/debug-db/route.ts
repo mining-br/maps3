@@ -1,15 +1,15 @@
-// app/api/debug-db/route.ts
 import { NextResponse } from "next/server";
 import { getDB } from "@/lib/db";
 
-export async function GET() {
-  const db = await getDB();
+// Force Node.js runtime (filesystem allowed)
+export const runtime = "nodejs";
 
+export async function GET() {
+  const db = getDB();
   return NextResponse.json({
-    ok: true,
     counts: {
-      states: Object.keys(db.byUF).length,
       cities: db.cities.length,
+      states: db.byUF ? Object.keys(db.byUF).length : 0,
     },
     sample: db.cities.slice(0, 5),
   });
