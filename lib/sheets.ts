@@ -1,46 +1,58 @@
 // lib/sheets.ts
-import { getDB } from "./db";
-import type { SheetCandidate } from "./types";
+// Busca “candidatos” de folhas pelo nome da cidade (texto solto) com filtro opcional por UF.
 
-// Normaliza: remove acentos, baixa para minúsculas e tira espaços extras
-function norm(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+import { getDB } from "./db";
+
+// Tipo local — não dependemos mais de ./types
+export type SheetCandidate = {
+  code: string;
+  title?: string;
+  uf?: string;
+  scale?: "1:250000" | "1:100000" | "1:50000";
+};
+
+// Normaliza: remove acentos, minúsculas e espaços extras
+function norm(s: string = ""): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
- * Busca folhas/cartas por nome de cidade e UF.
- * - `query`: nome (parcial) da cidade
- * - `uf`: UF opcional para restringir (ex.: "BA")
+ * Retorna até 50 candidatos com match no nome da cidade.
+ * - Se `uf` vier, prioriza resultados daquela UF.
+ * - Ordena por score simples (prefixo conta mais).
  */
-export function searchSheets(query: string, uf?: string): SheetCandidate[] {
+export function searchSheetsByCityName(
+  uf: string | undefined,
+  query: string
+): SheetCandidate[] {
   const db = getDB();
+  const q = norm(query);
 
-  const q: string = norm(query || "");
-  // Se vier UF, restringe; caso contrário usa tudo
-  const list: SheetCandidate[] = db.cities.filter((c: SheetCandidate) =>
-    uf ? c.uf === uf : true
-  );
+  // Filtra por UF se fornecida
+  const list = db.cities.filter((c: any) => (uf ? c.uf === uf : true));
 
-  // Se a busca estiver vazia, retorna primeiras 50 (já filtradas por UF)
-  if (q.length === 0) {
-    return list.slice(0, 50);
-  }
-
-  // Calcula "score" simples e mantém só as que contém o termo
-  const hits: SheetCandidate[] = list
-    .map((c: SheetCandidate) => {
-      const name = norm(c.title ?? ""); // protege title undefined
+  // Calcula score simples por nome
+  const hits = list
+    .map((c: any) => {
+      const name = norm(c.title || "");
       const score =
-        (name.startsWith(q) ? 0 : 1) + (name.includes(q) ? 0 : 1);
+        (name.startsWith(q) ? 0 : 1) +
+        (name.includes(q) ? 0 : 1) +
+        (uf && c.uf !== uf ? 2 : 0);
       return { c, score };
     })
-    // garante que existe title e que contém o termo
-    .filter((x) => (x.c.title ? norm(x.c.title).includes(q) : false))
-    .sort((a, b) => a.score - b.score)
+    // mantém apenas os que batem o texto (quando query não vazia)
+    .filter((x: { c: any; score: number }) =>
+      q.length === 0 ? true : norm(x.c.title || "").includes(q)
+    )
+    .sort((a: { score: number }, b: { score: number }) => a.score - b.score)
     .slice(0, 50)
-    .map((x) => x.c);
+    .map((x: { c: any }) => x.c as SheetCandidate);
 
   return hits;
 }
-
-export default searchSheets;
