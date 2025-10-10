@@ -66,7 +66,7 @@ export function getDB(): DB {
   return CACHE
 }
 
-// ---------- Helpers de busca (usados pela API) ----------
+// ---------- Helpers de normalização e busca ----------
 
 const norm = (s: string) =>
   (s || '')
@@ -104,4 +104,19 @@ export function findCitySheets(uf: string, city: string): {
   }
 
   return { sheets: null, suggestions }
+}
+
+/**
+ * Wrappers compatíveis com o que `lib/rigeo.ts` importa.
+ * - `findCityExact`: retorna apenas os grupos de folhas (ou null) para UF + cidade.
+ * - `suggestCities`: retorna sugestões de nomes de cidade quando não houver match exato.
+ */
+export function findCityExact(uf: string, city: string): CitySheets | null {
+  const { sheets } = findCitySheets(uf, city)
+  return sheets
+}
+
+export function suggestCities(uf: string, city: string): string[] {
+  const { sheets, suggestions } = findCitySheets(uf, city)
+  return sheets ? [] : suggestions
 }
