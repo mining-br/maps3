@@ -1,86 +1,107 @@
 // lib/db.ts
-import fs from "node:fs";
-import path from "node:path";
-import { DB, CitySheets, UFMap } from "./types";
-import { norm } from "./utils";
+// Monta um "banco" em memória a partir de data/vercel_data.json
+// e expõe helpers para lookup por UF + cidade.
 
-let _db: DB | null = null;
+import vercelData from '@/data/vercel_data.json' assert { type: 'json' }
+
+// Tipos mínimos necessários (mantém compatível com o resto do projeto)
+export type SheetEntry = {
+  code: string
+  title?: string
+  year?: string | number
+  pdf?: string
+  minerals?: string
+  report?: string
+  sig?: string
+  handle?: string
+}
+
+export type CitySheets = {
+  '250k': SheetEntry[]
+  '100k': SheetEntry[]
+  '50k': SheetEntry[]
+}
+
+export type DB = {
+  // Lista simples (útil para debug)
+  cities: { uf: string; city: string; title?: string }[]
+  // Índice principal: UF -> Cidade -> Grupos de folhas
+  byUF: Record<string, Record<string, CitySheets>>
+}
 
 function ensureCitySheets(obj: any): CitySheets {
-  const empty: CitySheets = { "250k": [], "100k": [], "50k": [] };
-  return {
-    "250k": Array.isArray(obj?.["250k"]) ? obj["250k"] : [],
-    "100k": Array.isArray(obj?.["100k"]) ? obj["100k"] : [],
-    "50k": Array.isArray(obj?.["50k"]) ? obj["50k"] : [],
-  } ?? empty;
+  const empty: CitySheets = { '250k': [], '100k': [], '50k': [] }
+  if (!obj || typeof obj !== 'object') return empty
+
+  const k250 = Array.isArray((obj as any)['250k']) ? (obj as any)['250k'] : []
+  const k100 = Array.isArray((obj as any)['100k']) ? (obj as any)['100k'] : []
+  const k50 = Array.isArray((obj as any)['50k']) ? (obj as any)['50k'] : []
+
+  return { '250k': k250, '100k': k100, '50k': k50 }
 }
 
-export async function getDB(): Promise<DB> {
-  if (_db) return _db;
+let CACHE: DB | null = null
 
-  // Caminho do vercel_data.json
-  const dataFile = path.join(process.cwd(), "data", "vercel_data.json");
-  if (!fs.existsSync(dataFile)) {
-    throw new Error("Arquivo data/vercel_data.json não encontrado.");
-  }
+function buildDB(): DB {
+  const byUF: Record<string, Record<string, CitySheets>> = {}
+  const cities: DB['cities'] = []
 
-  const raw = fs.readFileSync(dataFile, "utf-8");
-  const json = JSON.parse(raw) as any;
+  // vercel_data.json esperado: { "BA": { "Salvador": {...}, "GERAL": {...} }, "SP": { ... } }
+  for (const [uf, cityMap] of Object.entries<any>(vercelData as any)) {
+    if (!cityMap || typeof cityMap !== 'object') continue
+    byUF[uf] = {}
 
-  // Aceita dois formatos:
-  // 1) { "UF": { "Cidade": { "250k":[], "100k":[], "50k":[] }, ... }, ... }
-  // 2) { "byUF": { ...o mapa acima... } }
-  const byUF: UFMap = json.byUF ? json.byUF : json;
-
-  // Normaliza estrutura e gera lista de cidades
-  const cities: { uf: string; city: string }[] = [];
-
-  for (const uf of Object.keys(byUF)) {
-    const cityMap = byUF[uf] || {};
-    for (const cityName of Object.keys(cityMap)) {
-      // Garante que cada cidade tenha as três chaves
-      (byUF[uf][cityName] as any) = ensureCitySheets(cityMap[cityName]);
-      cities.push({ uf, city: cityName });
+    for (const [city, payload] of Object.entries<any>(cityMap)) {
+      byUF[uf][city] = ensureCitySheets(payload)
+      cities.push({ uf, city, title: city })
     }
   }
 
-  _db = { byUF, cities };
-  return _db;
+  return { byUF, cities }
 }
 
-// Utilitário: encontra cidade por UF e nome normalizado
-export async function findCityExact(uf: string, city: string) {
-  const db = await getDB();
-  const ufMap = db.byUF[uf];
-  if (!ufMap) return null;
+export function getDB(): DB {
+  if (CACHE) return CACHE
+  CACHE = buildDB()
+  return CACHE
+}
 
-  const needle = norm(city);
-  for (const name of Object.keys(ufMap)) {
-    if (norm(name) === needle) {
-      return { name, sheets: ufMap[name] };
+// ---------- Helpers de busca (usados pela API) ----------
+
+const norm = (s: string) =>
+  (s || '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
+
+/**
+ * Busca exata (case-insensitive e sem acentos) e tenta fallback por aproximação simples.
+ */
+export function findCitySheets(uf: string, city: string): {
+  sheets: CitySheets | null
+  suggestions: string[]
+} {
+  const db = getDB()
+  const state = db.byUF[uf]
+  if (!state) return { sheets: null, suggestions: [] }
+
+  // 1) match exato por normalização
+  const nQuery = norm(city)
+  for (const key of Object.keys(state)) {
+    if (norm(key) === nQuery) {
+      return { sheets: state[key], suggestions: [] }
     }
   }
-  return null;
-}
 
-// Utilitário: sugestões aproximadas dentro da UF
-export async function suggestCities(uf: string, city: string, max = 10) {
-  const db = await getDB();
-  const ufMap = db.byUF[uf] || {};
-  const needle = norm(city);
+  // 2) fallback: sugestões por "includes"
+  const suggestions: string[] = []
+  for (const key of Object.keys(state)) {
+    if (norm(key).includes(nQuery)) {
+      suggestions.push(key)
+      if (suggestions.length >= 10) break
+    }
+  }
 
-  const score = (name: string) => {
-    const n = norm(name);
-    if (n === needle) return 0;
-    let s = 0;
-    if (!n.startsWith(needle)) s += 1;
-    if (!n.includes(needle)) s += 1;
-    return s;
-  };
-
-  return Object.keys(ufMap)
-    .map((name) => ({ name, s: score(name) }))
-    .sort((a, b) => a.s - b.s)
-    .slice(0, max)
-    .map((x) => x.name);
+  return { sheets: null, suggestions }
 }
