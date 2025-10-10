@@ -1,6 +1,5 @@
-// app/api/search/route.ts
 import { NextResponse } from "next/server";
-import { searchCitySheets } from "../../../lib/rigeo";
+import { searchCitySheets } from "@/lib/rigeo";  // <- voltou o alias @
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
