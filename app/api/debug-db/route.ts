@@ -1,6 +1,5 @@
-// app/api/debug-db/route.ts
 import { NextResponse } from "next/server";
-import { getDB } from "../../../lib/db";
+import { getDB } from "@/lib/db";   // <- voltou o alias @
 
 export async function GET() {
   const db = getDB();
