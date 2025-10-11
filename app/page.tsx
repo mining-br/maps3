@@ -22,6 +22,14 @@ const UF_LIST = [
   "PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"
 ];
 
+// simples: decodifica entidades HTML como &#x20;, &amp;, &nbsp;, etc.
+function decodeHtml(s: string): string {
+  if (!s) return "";
+  const el = document.createElement("textarea");
+  el.innerHTML = s;
+  return el.value;
+}
+
 export default function HomePage() {
   const [uf, setUf] = useState<string>("BA");
   const [city, setCity] = useState<string>("");
@@ -55,7 +63,6 @@ export default function HomePage() {
     }
   }, [uf, city]);
 
-  // “Grupos” por escala (quando o dataset local estiver completo)
   const groups = useMemo(() => ({
     k250: resp?.groups?.k250 ?? [],
     k100: resp?.groups?.k100 ?? [],
@@ -97,32 +104,27 @@ export default function HomePage() {
         </button>
       </form>
 
-      {/* mensagens */}
       {err && (
         <div style={{ marginTop: 16, color: "#b00020" }}>
           {err}
         </div>
       )}
 
-      {/* resultado bruto (debug) */}
       {resp?.ok && (
         <div style={{ marginTop: 12, fontSize: 12, color: "#666" }}>
           {resp.mode === "live-rigeo" ? "Modo: busca ao vivo no RIGeo" : null}
         </div>
       )}
 
-      {/* renderização de grupos por escala (quando existirem) */}
       {resp?.ok && hasAnyGroup && (
         <div style={{ marginTop: 24 }}>
           <h3 style={{ marginBottom: 8 }}>Resultados por escala</h3>
-
           <GroupBlock title="1:250.000" items={groups.k250} />
           <GroupBlock title="1:100.000" items={groups.k100} />
           <GroupBlock title="1:50.000"  items={groups.k50} />
         </div>
       )}
 
-      {/* fallback: lista plana de itens (modo “ao vivo” no RIGeo) */}
       {resp?.ok && (resp.items?.length ?? 0) > 0 && (
         <div style={{ marginTop: 24 }}>
           <h3 style={{ marginBottom: 8 }}>Resultados do acervo (RIGeo)</h3>
@@ -130,7 +132,7 @@ export default function HomePage() {
             {resp.items!.map((it, i) => (
               <li key={i} style={{ marginBottom: 6 }}>
                 <a href={it.href} target="_blank" rel="noreferrer">
-                  {it.title}
+                  {decodeHtml(it.title)}
                 </a>
               </li>
             ))}
@@ -138,7 +140,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* nenhum resultado */}
       {resp?.ok && !hasAnyGroup && (!resp.items || resp.items.length === 0) && (
         <div style={{ marginTop: 16 }}>
           Nenhum resultado encontrado para <strong>{resp?.query?.city}</strong> / <strong>{resp?.query?.uf}</strong>.
@@ -163,19 +164,11 @@ function GroupBlock({ title, items }: { title: string; items: any[] }) {
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
       <ul style={{ paddingLeft: 18 }}>
         {items.map((it: any, idx: number) => {
-          const label =
-            it?.title ||
-            it?.sheetCode ||
-            it?.code ||
-            it?.name ||
-            `Folha ${idx + 1}`;
+          const label = decodeHtml(
+            it?.title || it?.sheetCode || it?.code || it?.name || `Folha ${idx + 1}`
+          );
           const href =
-            it?.href ||
-            it?.handle ||
-            it?.pdf ||
-            it?.acervo ||
-            it?.link ||
-            "#";
+            it?.href || it?.handle || it?.pdf || it?.acervo || it?.link || "#";
           return (
             <li key={idx} style={{ marginBottom: 6 }}>
               {href && href !== "#" ? (
@@ -192,4 +185,3 @@ function GroupBlock({ title, items }: { title: string; items: any[] }) {
     </div>
   );
 }
-
