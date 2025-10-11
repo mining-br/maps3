@@ -1,143 +1,195 @@
 "use client";
 
-import { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
-const UFS = [
-  "AC","AL","AM","AP","BA","CE","DF","ES","GO","MA",
-  "MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN",
-  "RO","RR","RS","SC","SE","SP","TO"
+type ApiResp = {
+  ok?: boolean;
+  mode?: string;
+  query?: { uf: string; city: string };
+  groups?: {
+    k250?: any[];
+    k100?: any[];
+    k50?: any[];
+  };
+  items?: { title: string; href: string }[];
+  message?: string;
+  error?: string;
+  debug?: any;
+};
+
+const UF_LIST = [
+  "AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT",
+  "PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"
 ];
 
-type ApiItem = {
-  handle: string;
-  title: string;
-  year?: string;
-  uf?: string;
-  links: { href: string; label: string }[];
-  scale: "250k" | "100k" | "50k" | "unknown";
-};
-
-type ApiResponse = {
-  ok: boolean;
-  error?: string;
-  groups?: {
-    k250: ApiItem[];
-    k100: ApiItem[];
-    k50: ApiItem[];
-    other: ApiItem[];
-  };
-  note?: string;
-};
-
-export default function Page() {
-  const [uf, setUf] = useState("MG");
-  const [city, setCity] = useState("");
+export default function HomePage() {
+  const [uf, setUf] = useState<string>("BA");
+  const [city, setCity] = useState<string>("");
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<ApiResponse | null>(null);
+  const [resp, setResp] = useState<ApiResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
+    setErr(null);
+    setResp(null);
+    const u = uf.trim().toUpperCase();
+    const c = city.trim();
+    if (!u || !c) {
+      setErr("Informe UF e Cidade.");
+      return;
+    }
     setLoading(true);
-    setData(null);
     try {
-      const res = await fetch(`/api/search?uf=${encodeURIComponent(uf)}&city=${encodeURIComponent(city)}`);
-      const json: ApiResponse = await res.json();
-      setData(json);
-    } catch (err) {
-      setData({ ok: false, error: (err as Error).message });
+      const qs = new URLSearchParams({ uf: u, city: c }).toString();
+      const r = await fetch(`/api/search?${qs}`, { cache: "no-store" });
+      const j: ApiResp = await r.json();
+      setResp(j);
+      if (!j.ok) {
+        setErr(j.message || "Busca sem sucesso.");
+      }
+    } catch (e: any) {
+      setErr(String(e?.message || e));
     } finally {
       setLoading(false);
     }
-  }
+  }, [uf, city]);
 
-  function Group({ title, items }: { title: string; items: ApiItem[] }) {
-    return (
-      <div style={{ marginTop: 24 }}>
-        <h3 style={{ margin: 0, fontSize: 18 }}>{title}</h3>
-        {items.length === 0 ? (
-          <p style={{ color: "#555" }}>Nenhum item encontrado.</p>
-        ) : (
-          <ul style={{ paddingLeft: 18 }}>
-            {items.map((it) => (
-              <li key={it.handle} style={{ marginBottom: 10 }}>
-                <div style={{ fontWeight: 600 }}>{it.title}</div>
-                <div style={{ fontSize: 13, color: "#666" }}>
-                  {it.year ? `Ano: ${it.year} · ` : ""}Handle:{" "}
-                  <a href={it.handle} target="_blank" rel="noreferrer">{it.handle}</a>
-                </div>
-                <div style={{ marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {it.links.map((l, i) => (
-                    <a
-                      key={i}
-                      href={l.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        border: "1px solid #ddd",
-                        padding: "4px 8px",
-                        borderRadius: 6,
-                        textDecoration: "none"
-                      }}
-                    >
-                      {l.label}
-                    </a>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-  }
+  // “Grupos” por escala (quando o dataset local estiver completo)
+  const groups = useMemo(() => ({
+    k250: resp?.groups?.k250 ?? [],
+    k100: resp?.groups?.k100 ?? [],
+    k50:  resp?.groups?.k50  ?? [],
+  }), [resp]);
+
+  const hasAnyGroup =
+    (groups.k250?.length ?? 0) > 0 ||
+    (groups.k100?.length ?? 0) > 0 ||
+    (groups.k50?.length ?? 0)  > 0;
 
   return (
-    <main style={{ maxWidth: 880, margin: "32px auto", padding: "0 16px" }}>
-      <h1 style={{ marginTop: 0 }}>Buscador SGB (RIGeo) por Cidade/UF</h1>
-      <p style={{ color: "#444" }}>
+    <main style={{ maxWidth: 960, margin: "32px auto", padding: "0 16px", fontFamily: "system-ui, -apple-system, Arial, sans-serif" }}>
+      <h1 style={{ marginBottom: 8 }}>Buscador SGB (RIGeo) por Cidade/UF</h1>
+      <p style={{ color: "#444", marginTop: 0 }}>
         Busca ao vivo no acervo do <strong>SGB</strong> (RIGeo). Informe a UF e a cidade.
       </p>
 
-      <form onSubmit={onSubmit} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 16 }}>
         <label>
-          UF<br />
-          <select value={uf} onChange={(e) => setUf(e.target.value)} required>
-            {UFS.map((u) => <option key={u} value={u}>{u}</option>)}
+          <div style={{ fontSize: 12, color: "#555" }}>UF</div>
+          <select value={uf} onChange={(e) => setUf(e.target.value)} style={{ padding: 8 }}>
+            {UF_LIST.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         </label>
-        <label style={{ flex: 1, minWidth: 240 }}>
-          Cidade<br />
+
+        <label style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, color: "#555" }}>Cidade</div>
           <input
             value={city}
             onChange={(e) => setCity(e.target.value)}
-            placeholder="Ex.: Belo Horizonte"
-            required
+            placeholder="Ex.: Salvador"
             style={{ width: "100%", padding: 8 }}
           />
         </label>
-        <button
-          type="submit"
-          disabled={loading}
-          style={{ padding: "8px 14px", cursor: "pointer" }}
-        >
+
+        <button type="submit" disabled={loading} style={{ padding: "10px 16px" }}>
           {loading ? "Buscando..." : "Buscar"}
         </button>
       </form>
 
-      {data && (
-        <section style={{ marginTop: 24 }}>
-          {!data.ok && <p style={{ color: "crimson" }}>Erro: {data.error}</p>}
-          {data.ok && data.note && <p style={{ color: "#666" }}>{data.note}</p>}
-          {data.ok && data.groups && (
-            <>
-              <Group title="1:250k" items={data.groups.k250} />
-              <Group title="1:100k" items={data.groups.k100} />
-              <Group title="1:50k" items={data.groups.k50} />
-              <Group title="Outros (escala não detectada)" items={data.groups.other} />
-            </>
-          )}
-        </section>
+      {/* mensagens */}
+      {err && (
+        <div style={{ marginTop: 16, color: "#b00020" }}>
+          {err}
+        </div>
+      )}
+
+      {/* resultado bruto (debug) */}
+      {resp?.ok && (
+        <div style={{ marginTop: 12, fontSize: 12, color: "#666" }}>
+          {resp.mode === "live-rigeo" ? "Modo: busca ao vivo no RIGeo" : null}
+        </div>
+      )}
+
+      {/* renderização de grupos por escala (quando existirem) */}
+      {resp?.ok && hasAnyGroup && (
+        <div style={{ marginTop: 24 }}>
+          <h3 style={{ marginBottom: 8 }}>Resultados por escala</h3>
+
+          <GroupBlock title="1:250.000" items={groups.k250} />
+          <GroupBlock title="1:100.000" items={groups.k100} />
+          <GroupBlock title="1:50.000"  items={groups.k50} />
+        </div>
+      )}
+
+      {/* fallback: lista plana de itens (modo “ao vivo” no RIGeo) */}
+      {resp?.ok && (resp.items?.length ?? 0) > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <h3 style={{ marginBottom: 8 }}>Resultados do acervo (RIGeo)</h3>
+          <ul style={{ paddingLeft: 18 }}>
+            {resp.items!.map((it, i) => (
+              <li key={i} style={{ marginBottom: 6 }}>
+                <a href={it.href} target="_blank" rel="noreferrer">
+                  {it.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* nenhum resultado */}
+      {resp?.ok && !hasAnyGroup && (!resp.items || resp.items.length === 0) && (
+        <div style={{ marginTop: 16 }}>
+          Nenhum resultado encontrado para <strong>{resp?.query?.city}</strong> / <strong>{resp?.query?.uf}</strong>.
+          Tente variações do nome (sem acentos) ou uma cidade próxima.
+        </div>
       )}
     </main>
   );
 }
+
+function GroupBlock({ title, items }: { title: string; items: any[] }) {
+  if (!items || items.length === 0) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 600 }}>{title}</div>
+        <div style={{ color: "#666" }}>Sem itens para esta escala.</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      <ul style={{ paddingLeft: 18 }}>
+        {items.map((it: any, idx: number) => {
+          const label =
+            it?.title ||
+            it?.sheetCode ||
+            it?.code ||
+            it?.name ||
+            `Folha ${idx + 1}`;
+          const href =
+            it?.href ||
+            it?.handle ||
+            it?.pdf ||
+            it?.acervo ||
+            it?.link ||
+            "#";
+          return (
+            <li key={idx} style={{ marginBottom: 6 }}>
+              {href && href !== "#" ? (
+                <a href={href} target="_blank" rel="noreferrer">
+                  {label}
+                </a>
+              ) : (
+                <span>{label}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
